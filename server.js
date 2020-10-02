@@ -19,7 +19,7 @@ const app = express();
 app.use(cors());
 app.use(bodyParser.json());
 app.use(morgan("tiny"));
-app.use(helmet());
+//app.use(helmet());
 
 const verifyToken = async (req, res, next) => {
 	const { authorization } = req.headers;
