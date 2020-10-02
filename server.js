@@ -11,31 +11,27 @@ const Users = require("./Models/Users");
 const Cards = require("./Models/Cards");
 const crypto = require("crypto");
 const PORT = process.env.PORT;
+const IV = process.env.IV;
+const KEY = process.env.KEY;
+const algorithm = "aes-256-cbc";
 
 const app = express();
-app.use(
-	cors({
-		origin: "http://localhost:3000",
-	})
-);
+app.use(cors());
 app.use(bodyParser.json());
 app.use(morgan("tiny"));
 app.use(helmet());
-
-const algorithm = "aes256";
-const key = process.env.KEY;
 
 const verifyToken = async (req, res, next) => {
 	const { authorization } = req.headers;
 	if (!authorization)
 		return res.status(401).json({ error: "You Must be Logged In to Continue" });
 	const token = authorization.replace("Bearer ", "");
-	jwt.verify(token, process.env.TOKEN_SECRET, async (err, payload) => {
+	jwt.verify(token, process.env.JWT_SECRET, async (err, payload) => {
 		if (err)
 			return res
 				.status(401)
 				.json({ error: "You Must be Logged In to Continue" });
-		const { id } = payload;
+		const id = payload;
 		const fetchedUser = await Users.findById(id);
 		try {
 			req.user = fetchedUser;
@@ -117,14 +113,12 @@ app.post("/login", async (req, res) => {
 
 app.post("/new", verifyToken, async (req, res) => {
 	let { title, reference, password, description } = req.body;
-	const addedBy = req.id;
+	const addedBy = req.user.id;
 	if (!title) return res.status(400).json({ error: "Enter the Title!" });
 
-	let cipher = crypto.createCipher(algorithm, key);
-	password = cipher.update(password, "utf8", "hex") + cipher.final("hex");
-	description = cipher.update(description, "utf8", "hex") + cipher.final("hex");
-	title = cipher.update(title, "utf8", "hex") + cipher.final("hex");
-	reference = cipher.update(reference, "utf8", "hex") + cipher.final("hex");
+	let cipher = crypto.createCipheriv(algorithm, KEY, IV);
+	password = cipher.update(password, "utf-8", "hex");
+	password += cipher.final("hex");
 
 	const newCard = new Cards({
 		title,
@@ -142,20 +136,12 @@ app.post("/new", verifyToken, async (req, res) => {
 });
 
 app.get("/cards", verifyToken, async (req, res) => {
-	const cards = await Cards.find({ addedBy: req.id });
 	try {
-		if (cards) {
-			let { addedOn, title, description, reference } = cards;
-			var decipher = crypto.createDecipher(algorithm, key);
-			title = decipher.update(title, "hex", "utf8") + decipher.final("utf8");
-			description =
-				decipher.update(description, "hex", "utf8") + decipher.final("utf8");
-			reference =
-				decipher.update(reference, "hex", "utf8") + decipher.final("utf8");
-			return res
-				.status(200)
-				.json({ message: { addedOn, title, description, reference } });
-		} else return res.status(200).json({ message: "No Cards Yet!" });
+		const savedCards = await Cards.find({ addedBy: req.user.id }).select(
+			"-password -addedBy -__v"
+		);
+		if (!savedCards) return res.status(200).json({ error: "No Cards Yet!" });
+		return res.status(200).json(savedCards);
 	} catch (err) {
 		res.status(400).json({ error: "Unable to Get Cards! Please Try Again!" });
 	}
@@ -164,11 +150,12 @@ app.get("/cards", verifyToken, async (req, res) => {
 app.get("/card/:cardId", verifyToken, async (req, res) => {
 	const card = await Cards.findById(req.params.cardId);
 	try {
-		if (!card) return res.status(400).json({ err: "Card Not Found!" });
+		if (!card) return res.status(400).json({ error: "Card Not Found!" });
 		let password = card.password;
-		var decipher = crypto.createDecipher(algorithm, key);
-		password =
-			decipher.update(password, "hex", "utf8") + decipher.final("utf8");
+		let decipher = crypto.createDecipheriv(algorithm, KEY, IV);
+		password = decipher.update(password, "hex", "utf-8");
+		password += decipher.final("utf-8");
+		return res.status(200).json({ message: password });
 	} catch (err) {
 		res.status(400).json({ error: "Card Not Found!" });
 	}
@@ -183,10 +170,10 @@ app.delete("/card/:cardId", verifyToken, async (req, res) => {
 	const card = await Cards.findByIdAndDelete(req.params.cardId);
 	try {
 		if (!card) return res.status(400).json({ error: "Card Not Found!" });
-		res.status(200).json({ message: "Card Deleted Successfully!" });
+		res.status(200).json({ error: "Card Deleted Successfully!" });
 	} catch (err) {
 		res.status(400).json({ error: "Card Not Found!" });
 	}
 });
 
-app.listen(PORT, () => console.log(`Server is running on Port ${PORT}`));
+app.listen(PORT);
